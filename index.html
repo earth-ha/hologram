@@ -1,0 +1,408 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<style>
+:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+body{margin:0}
+img{max-width:100%}
+[hidden]{display:none!important}
+</style>
+<title>홀로그램 4면 영상</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* 레이아웃: 왼쪽 큰 미리보기(검은 무대) + 오른쪽 조절 패널, 휴대폰에서는 위아래로 쌓임.
+   홀로그램은 검은 배경이 필수라 어두운 단일 테마로 고정 */
+:root{
+  --bg:#08090b;
+  --panel:#101317;
+  --line:#252b31;
+  --fg:#e6ebee;
+  --muted:#8b97a1;
+  --accent:#86d3e3;
+  --accent-ink:#06171b;
+  --font-body:"IBM Plex Sans KR",system-ui,-apple-system,"Apple SD Gothic Neo","Malgun Gothic",sans-serif;
+  --font-mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
+  color-scheme:dark;
+}
+html,body{background:var(--bg);color:var(--fg)}
+body{
+  font-family:var(--font-body);font-size:15px;line-height:1.55;
+  padding-left:max(16px,env(safe-area-inset-left,0px));
+  padding-right:max(16px,env(safe-area-inset-right,0px));
+  padding-block:20px 40px;
+}
+.wrap{max-width:1040px;margin:0 auto;display:grid;gap:20px}
+header h1{font-size:1.5rem;line-height:1.3;margin:0;text-wrap:balance;font-weight:700}
+header p{margin:6px 0 0;color:var(--muted);max-width:62ch}
+.main{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);gap:20px;align-items:start}
+@media (max-width:760px){.main{grid-template-columns:1fr}}
+
+.preview{position:relative;background:#000;border:1px solid var(--line);border-radius:10px;overflow:hidden;aspect-ratio:1/1;width:100%;max-width:100%}
+.preview canvas{display:block;width:100%;height:100%}
+.preview.drag{outline:2px dashed var(--accent);outline-offset:-8px}
+.badge{position:absolute;left:10px;top:10px;font:500 12px/1 var(--font-mono);color:var(--muted);background:rgba(16,19,23,.8);border:1px solid var(--line);padding:6px 8px;border-radius:6px;letter-spacing:.02em}
+
+.panel{display:grid;gap:18px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px}
+.group{display:grid;gap:10px}
+.group h2{margin:0;font-size:.78rem;font-weight:500;letter-spacing:.08em;color:var(--muted)}
+.row{display:flex;flex-wrap:wrap;gap:8px}
+button,.filebtn{
+  font:500 14px/1 var(--font-body);color:var(--fg);background:transparent;
+  border:1px solid var(--line);border-radius:8px;padding:11px 14px;cursor:pointer;
+}
+button:hover,.filebtn:hover{border-color:var(--muted)}
+button:focus-visible,.filebtn:focus-within,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent);font-weight:700}
+.primary:hover{border-color:var(--fg)}
+.big{width:100%;padding:15px;font-size:16px}
+.filebtn input{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
+.filename{font-size:13px;color:var(--muted);overflow-wrap:anywhere}
+
+.slider{display:grid;gap:4px}
+.slider label{display:flex;justify-content:space-between;gap:8px;font-size:14px}
+.slider output{font:500 13px var(--font-mono);color:var(--accent);font-variant-numeric:tabular-nums}
+input[type=range]{width:100%;accent-color:var(--accent)}
+.check{display:flex;align-items:center;gap:10px;font-size:14px;cursor:pointer}
+.check input{width:18px;height:18px;accent-color:var(--accent)}
+.hint{font-size:12.5px;color:var(--muted);margin:0}
+
+.srcvideo{position:fixed;left:0;top:0;width:4px;height:4px;opacity:.01;pointer-events:none;z-index:-1}
+.tips{margin:0;padding-left:1.1em;color:var(--muted);font-size:13.5px;display:grid;gap:4px}
+
+/* 재생 화면 */
+.stage{position:fixed;inset:0;background:#000;z-index:100;display:flex;align-items:center;justify-content:center;touch-action:manipulation}
+.stage canvas{display:block}
+.close{
+  position:absolute;
+  top:calc(12px + env(safe-area-inset-top,0px));
+  right:calc(12px + env(safe-area-inset-right,0px));
+  background:rgba(20,24,28,.85);color:#e6ebee;border-color:#333a41;
+  transition:opacity .3s;
+}
+.stage.idle .close{opacity:0;pointer-events:none}
+@media (prefers-reduced-motion:reduce){.close{transition:none}}
+</style>
+
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>홀로그램 4면 영상 만들기</h1>
+    <p>사진이나 영상을 넣으면 가운데 네모를 중심으로 위·아래·왼쪽·오른쪽 네 방향 화면을 만들어요. 휴대폰에서 이 페이지를 열고 <b>크게 보기</b>를 누른 뒤 피라미드를 가운데 네모 위에 올리면 돼요.</p>
+  </header>
+
+  <div class="main">
+    <div class="preview" id="preview">
+      <canvas id="cv"></canvas>
+      <span class="badge" id="badge">예시 · 원자 모형</span>
+    </div>
+
+    <div class="panel">
+      <div class="group">
+        <h2>원본</h2>
+        <div class="row">
+          <label class="filebtn">사진·영상 넣기
+            <input type="file" id="file" accept="image/*,video/*">
+          </label>
+          <button type="button" id="sampleBtn">예시로 돌아가기</button>
+        </div>
+        <div class="filename" id="fname">검은 배경의 사진·영상일수록 선명하게 떠 보여요. 미리보기에 끌어다 놓아도 돼요.</div>
+        <div class="row" id="videoCtl" hidden>
+          <button type="button" id="playBtn">일시정지</button>
+          <button type="button" id="muteBtn">소리 켜기</button>
+        </div>
+      </div>
+
+      <div class="group">
+        <h2>배치 조절</h2>
+        <div class="slider">
+          <label for="center">가운데 네모 크기 <output id="centerOut"></output></label>
+          <input type="range" id="center" min="6" max="40" step="1">
+        </div>
+        <div class="slider">
+          <label for="size">그림 크기 <output id="sizeOut"></output></label>
+          <input type="range" id="size" min="40" max="160" step="1">
+        </div>
+        <div class="slider">
+          <label for="pos">바깥쪽으로 이동 <output id="posOut"></output></label>
+          <input type="range" id="pos" min="-40" max="40" step="1">
+        </div>
+        <div class="slider">
+          <label for="gap">네모와 그림 사이 간격 <output id="gapOut"></output></label>
+          <input type="range" id="gap" min="0" max="12" step="0.5">
+        </div>
+        <label class="check"><input type="checkbox" id="mirror"> 좌우 반전 (글자가 거꾸로 보일 때)</label>
+        <label class="check"><input type="checkbox" id="guide"> 가운데 네모 테두리 보이기</label>
+        <p class="hint">피라미드 아래쪽 구멍이 가운데 네모와 비슷한 크기가 되도록 맞추세요.</p>
+      </div>
+
+      <button type="button" class="primary big" id="goBtn">크게 보기</button>
+
+      <div class="group">
+        <h2>잘 보이게 하는 법</h2>
+        <ul class="tips">
+          <li>화면 밝기를 최대로, 방은 최대한 어둡게</li>
+          <li>휴대폰 화면 회전 잠금을 켜 두기</li>
+          <li>피라미드는 좁은 쪽이 아래로 오게 가운데 네모 위에</li>
+          <li>눈높이를 피라미드 옆면과 맞춰서 보기</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="stage" id="stage" hidden>
+  <button type="button" class="close" id="closeBtn">닫기</button>
+</div>
+
+<script>
+(function(){
+  const cv = document.getElementById('cv');
+  const ctx = cv.getContext('2d');
+  const preview = document.getElementById('preview');
+  const stage = document.getElementById('stage');
+  const badge = document.getElementById('badge');
+
+  const defaults = {center:16, size:100, pos:0, gap:1, mirror:false, guide:true};
+  let state = Object.assign({}, defaults);
+  try{
+    const saved = JSON.parse(localStorage.getItem('holo4-settings') || 'null');
+    if(saved) state = Object.assign(state, saved);
+  }catch(e){}
+  function save(){ try{ localStorage.setItem('holo4-settings', JSON.stringify(state)); }catch(e){} }
+
+  // ---- 컨트롤 연결 ----
+  const fmt = {center:v=>v+'%', size:v=>v+'%', pos:v=>(v>0?'+':'')+v, gap:v=>v+'%'};
+  ['center','size','pos','gap'].forEach(id=>{
+    const el = document.getElementById(id), out = document.getElementById(id+'Out');
+    el.value = state[id]; out.textContent = fmt[id](state[id]);
+    el.addEventListener('input', ()=>{ state[id] = parseFloat(el.value); out.textContent = fmt[id](state[id]); save(); });
+  });
+  ['mirror','guide'].forEach(id=>{
+    const el = document.getElementById(id);
+    el.checked = state[id];
+    el.addEventListener('change', ()=>{ state[id] = el.checked; save(); });
+  });
+
+  // ---- 원본 ----
+  let source = {kind:'sample'};
+  let objectURL = null;
+  const sampleCv = document.createElement('canvas');
+  sampleCv.width = sampleCv.height = 600;
+  const sctx = sampleCv.getContext('2d');
+
+  const videoCtl = document.getElementById('videoCtl');
+  const playBtn = document.getElementById('playBtn');
+  const muteBtn = document.getElementById('muteBtn');
+  const fname = document.getElementById('fname');
+
+  function clearSource(){
+    if(source.kind === 'video' || source.kind === 'loading'){
+      const v = source.el;
+      if(v){ v.pause(); v.removeAttribute('src'); v.load(); v.remove(); }
+    }
+    if(objectURL){ URL.revokeObjectURL(objectURL); objectURL = null; }
+    videoCtl.hidden = true;
+  }
+
+  function loadFile(file){
+    if(!file) return;
+    const isVideo = file.type.startsWith('video/');
+    const isImage = file.type.startsWith('image/');
+    if(!isVideo && !isImage){ fname.textContent = '사진이나 영상 파일만 넣을 수 있어요. 다른 파일을 골라 주세요.'; return; }
+    clearSource();
+    objectURL = URL.createObjectURL(file);
+    if(isImage){
+      const img = new Image();
+      img.onload = ()=>{ source = {kind:'image', el:img}; };
+      img.onerror = ()=>{ fname.textContent = '이 사진을 열 수 없어요. jpg나 png로 바꿔서 다시 넣어 주세요.'; };
+      img.src = objectURL;
+      badge.textContent = '사진';
+    }else{
+      const v = document.createElement('video');
+      v.muted = true; v.defaultMuted = true; v.loop = true; v.playsInline = true; v.preload = 'auto';
+      v.setAttribute('muted',''); v.setAttribute('playsinline',''); v.setAttribute('webkit-playsinline','');
+      v.className = 'srcvideo';
+      document.body.appendChild(v);   // 화면에 붙어 있어야 아이폰에서 프레임이 그려짐
+      source = {kind:'loading', el:v};
+      const ready = ()=>{ if(source.el === v){ source = {kind:'video', el:v}; v.play().catch(()=>{}); } };
+      v.addEventListener('loadeddata', ready);
+      v.addEventListener('canplay', ready);
+      let triedData = false;
+      v.addEventListener('error', ()=>{
+        if(source.el !== v) return;
+        if(!triedData){
+          // blob 주소가 막힌 환경이면 파일을 직접 읽어서 다시 시도
+          triedData = true;
+          const r = new FileReader();
+          r.onload = ()=>{ v.src = r.result; v.load(); v.play().catch(()=>{}); };
+          r.readAsDataURL(file);
+        }else{
+          fname.textContent = '이 영상을 재생할 수 없어요. mp4(H.264) 파일로 바꿔서 다시 넣어 주세요.';
+        }
+      });
+      v.src = objectURL;
+      v.load();
+      v.play().catch(()=>{});
+      videoCtl.hidden = false;
+      playBtn.textContent = '일시정지';
+      muteBtn.textContent = '소리 켜기';
+      badge.textContent = '영상';
+    }
+    fname.textContent = file.name;
+  }
+
+  document.getElementById('file').addEventListener('change', e=>{ loadFile(e.target.files[0]); e.target.value=''; });
+  document.getElementById('sampleBtn').addEventListener('click', ()=>{
+    clearSource(); source = {kind:'sample'}; badge.textContent = '예시 · 원자 모형';
+    fname.textContent = '검은 배경의 사진·영상일수록 선명하게 떠 보여요. 미리보기에 끌어다 놓아도 돼요.';
+  });
+  playBtn.addEventListener('click', ()=>{
+    if(source.kind!=='video') return;
+    const v = source.el;
+    if(v.paused){ v.play().catch(()=>{}); playBtn.textContent='일시정지'; }
+    else { v.pause(); playBtn.textContent='재생'; }
+  });
+  muteBtn.addEventListener('click', ()=>{
+    if(source.kind!=='video') return;
+    const v = source.el; v.muted = !v.muted;
+    muteBtn.textContent = v.muted ? '소리 켜기' : '소리 끄기';
+    v.play().catch(()=>{});
+  });
+
+  ['dragenter','dragover'].forEach(t=>preview.addEventListener(t, e=>{ e.preventDefault(); preview.classList.add('drag'); }));
+  ['dragleave','drop'].forEach(t=>preview.addEventListener(t, e=>{ e.preventDefault(); preview.classList.remove('drag'); }));
+  preview.addEventListener('drop', e=>{ const f = e.dataTransfer.files && e.dataTransfer.files[0]; loadFile(f); });
+
+  // ---- 예시: 원자 모형 ----
+  function drawSample(t){
+    const S = 600, c = S/2;
+    sctx.clearRect(0,0,S,S);
+    sctx.fillStyle = '#000'; sctx.fillRect(0,0,S,S);
+    const orbits = [0, Math.PI/3, -Math.PI/3];
+    const colors = ['#7fe3ff','#ffd27f','#ff8fb8'];
+    sctx.lineWidth = 3;
+    orbits.forEach((a,i)=>{
+      sctx.save(); sctx.translate(c,c); sctx.rotate(a);
+      sctx.strokeStyle = 'rgba(160,220,255,.45)';
+      sctx.beginPath(); sctx.ellipse(0,0,250,90,0,0,Math.PI*2); sctx.stroke();
+      const th = t*0.0016*(1+i*0.25) + i*2.1;
+      const ex = Math.cos(th)*250, ey = Math.sin(th)*90;
+      const g = sctx.createRadialGradient(ex,ey,0,ex,ey,30);
+      g.addColorStop(0, colors[i]); g.addColorStop(1,'rgba(0,0,0,0)');
+      sctx.fillStyle = g; sctx.beginPath(); sctx.arc(ex,ey,30,0,Math.PI*2); sctx.fill();
+      sctx.fillStyle = '#fff'; sctx.beginPath(); sctx.arc(ex,ey,8,0,Math.PI*2); sctx.fill();
+      sctx.restore();
+    });
+    const pulse = 1 + Math.sin(t*0.004)*0.06;
+    const ng = sctx.createRadialGradient(c,c,0,c,c,80*pulse);
+    ng.addColorStop(0,'#fff'); ng.addColorStop(.35,'#ff9a6b'); ng.addColorStop(1,'rgba(0,0,0,0)');
+    sctx.fillStyle = ng; sctx.beginPath(); sctx.arc(c,c,80*pulse,0,Math.PI*2); sctx.fill();
+  }
+
+  function getSource(t){
+    if(source.kind==='sample'){ drawSample(t); return {el:sampleCv, w:600, h:600}; }
+    if(source.kind==='image') return {el:source.el, w:source.el.naturalWidth, h:source.el.naturalHeight};
+    if(source.kind==='video'){
+      const v = source.el;
+      if(!v.videoWidth || v.readyState < 2) return null;
+      return {el:v, w:v.videoWidth, h:v.videoHeight};
+    }
+    return null;
+  }
+
+  // ---- 그리기 ----
+  function resize(){
+    const dpr = Math.min(window.devicePixelRatio || 1, 3);
+    let cssW, cssH;
+    if(!stage.hidden){
+      cssW = stage.clientWidth; cssH = stage.clientHeight;
+      const side = Math.min(cssW, cssH);
+      cv.style.width = side+'px'; cv.style.height = side+'px';
+      cssW = cssH = side;
+    }else{
+      cv.style.width = ''; cv.style.height = '';
+      cssW = preview.clientWidth; cssH = preview.clientHeight;
+    }
+    const w = Math.round(cssW*dpr), h = Math.round(cssH*dpr);
+    if(cv.width!==w || cv.height!==h){ cv.width = w; cv.height = h; }
+  }
+
+  function render(t){
+    resize();
+    const W = cv.width, H = cv.height;
+    ctx.setTransform(1,0,0,1,0,0);
+    ctx.fillStyle = '#000'; ctx.fillRect(0,0,W,H);
+    const S = Math.min(W,H), cx = W/2, cy = H/2;
+    const c = S*state.center/100;
+    const d = c/2 + S*state.gap/100;     // 중심에서 그림 영역이 시작되는 거리
+    const avail = Math.max(1, S/2 - d);  // 그림이 들어갈 수 있는 길이
+    const src = getSource(t);
+    if(src && src.w && src.h){
+      const box = avail*state.size/100;
+      const k = Math.min(box/src.w, box/src.h);
+      const dw = src.w*k, dh = src.h*k;
+      const yMid = -(d + avail/2 + state.pos*avail/100);
+      for(let i=0;i<4;i++){
+        ctx.save();
+        ctx.translate(cx,cy);
+        ctx.rotate(i*Math.PI/2);   // 위 → 오른쪽 → 아래 → 왼쪽, 그림 아랫변이 항상 가운데를 향함
+        ctx.beginPath();
+        ctx.moveTo(0,0); ctx.lineTo(-S/2,-S/2); ctx.lineTo(S/2,-S/2); ctx.closePath();
+        ctx.clip();
+        ctx.translate(0, yMid);
+        if(state.mirror) ctx.scale(-1,1);
+        ctx.drawImage(src.el, -dw/2, -dh/2, dw, dh);
+        ctx.restore();
+      }
+      // 가운데 네모는 항상 검게
+      ctx.fillStyle = '#000';
+      ctx.fillRect(cx-c/2, cy-c/2, c, c);
+    }
+    if(state.guide){
+      ctx.strokeStyle = 'rgba(134,211,227,.55)';
+      ctx.lineWidth = Math.max(1, S/400);
+      ctx.setLineDash([S/120, S/160]);
+      ctx.strokeRect(cx-c/2, cy-c/2, c, c);
+      ctx.setLineDash([]);
+    }
+    requestAnimationFrame(render);
+  }
+  requestAnimationFrame(render);
+
+  // ---- 크게 보기 ----
+  let wakeLock = null, idleTimer = null;
+  function poke(){
+    stage.classList.remove('idle');
+    clearTimeout(idleTimer);
+    idleTimer = setTimeout(()=>stage.classList.add('idle'), 2500);
+  }
+  async function enter(){
+    stage.hidden = false;
+    stage.insertBefore(cv, stage.firstChild);
+    document.documentElement.style.overflow = 'hidden';
+    poke();
+    try{ if(stage.requestFullscreen) await stage.requestFullscreen(); }catch(e){}
+    try{ if(navigator.wakeLock) wakeLock = await navigator.wakeLock.request('screen'); }catch(e){}
+    if(source.kind==='video') source.el.play().catch(()=>{});
+  }
+  function exit(){
+    stage.hidden = true;
+    preview.insertBefore(cv, preview.firstChild);
+    document.documentElement.style.overflow = '';
+    try{ if(document.fullscreenElement) document.exitFullscreen(); }catch(e){}
+    try{ if(wakeLock){ wakeLock.release(); wakeLock = null; } }catch(e){}
+  }
+  document.getElementById('goBtn').addEventListener('click', enter);
+  document.getElementById('closeBtn').addEventListener('click', e=>{ e.stopPropagation(); exit(); });
+  stage.addEventListener('pointerdown', poke);
+  document.addEventListener('fullscreenchange', ()=>{ if(!document.fullscreenElement && !stage.hidden) exit(); });
+  document.addEventListener('keydown', e=>{ if(e.key==='Escape' && !stage.hidden) exit(); });
+})();
+</script>
+
+</body>
+</html>
